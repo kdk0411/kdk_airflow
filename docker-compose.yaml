@@ -5,7 +5,7 @@ services:
     image: apache/airflow:2.5.1
     restart: always
     environment:
-	    # Airflow env
+    # Airflow env
       - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
       - AIRFLOW__CORE__LOGGING_CONFIG_CLASS=conf.custom_logger.LOGGING_CONFIG
       - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
