@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  airflow:
+    image: apache/airflow:2.5.1
+    restart: always
+    environment:
+	    # Airflow env
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__CORE__LOGGING_CONFIG_CLASS=conf.custom_logger.LOGGING_CONFIG
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./dags:/usr/local/airflow/dags
+      - ./plugins:/usr/local/airflow/plugins
+      - ./logs:/opt/airflow/logs
+      - ./conf:/opt/airflow/conf # custom_logger.py 파일
+      - ./airflow.cfg:/opt/airflow/airflow.cfg # airflow.cfg 파일 -> airflow.cfg 파일이 있어야 함 -> 없으면 만들고 작성
+    depends_on:
+      - redis
+      - spark-master
+      - spark-worker
+      - minio 
+      - metabase
+
+  spark-master:
+    image: bitnami/spark:latest
+    restart: always
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"  # Spark Master UI
+
+  spark-worker:
+    image: bitnami/spark:latest
+    restart: always
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077  # Spark Master URL
+    depends_on:
+      - spark-master
+
+  redis:
+    image: redis:latest
+    restart: always
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    container_name: minio
+    hostname: minio
+    restart: always
+    volumes:
+      - ./include/data/minio:/data
+    ports:
+      - 9000:9000
+      - 9001:9001
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - ndsnet
+
+  metabase:
+    image: metabase/metabase:v0.50.4
+    restart: always
+    ports:
+      - 3000:3000
+    volumes:
+      - ./include/data/metabase:/metabase-data
+    networks:
+      - ndsnet
+
+  docker-proxy:
+    image: alpine/socat
+    command: "TCP4-LISTEN:2375,fork,reuseaddr UNIX-CONNECT:/var/run/docker.sock"
+    ports:
+      - "2376:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ndsnet
+  
+      elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.5.2
+        restart: always
+        depends_on: 
+            - worker
+        environment:
+            ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+            discovery.type: single-node
+        ports: 
+            - "9200:9200"
+            - "9300:9300"
+
+  elasticsearch:
+      image: docker.elastic.co/elasticsearch/elasticsearch:7.5.2
+      restart: always
+      depends_on: 
+          - worker
+      environment:
+          ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+          discovery.type: single-node
+      ports: 
+          - "9200:9200"
+          - "9300:9300"
+
+  kibana:
+      image: docker.elastic.co/kibana/kibana:7.5.2
+      restart: always
+      depends_on:
+          - elasticsearch
+      volumes: 
+          - ./mnt/kibana/kibana.yml:/usr/share/kibana/config/kibana.yml
+      environment: 
+          ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+          SERVER_HOST: "0.0.0.0"
+      ports: 
+          - "5601:5601"
+
+  logstash:
+      image: docker.elastic.co/logstash/logstash:7.5.2
+      restart: always
+      depends_on:
+          - elasticsearch
+      volumes:
+          - ./mnt/logstash/pipeline:/usr/share/logstash/pipeline
+
+
+networks:
+  ndsnet:
+    driver: bridge
