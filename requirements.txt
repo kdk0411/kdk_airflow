@@ -1,2 +1,0 @@
-minio==7.1.14
-apache-airflow-providers-docker==3.7.1
